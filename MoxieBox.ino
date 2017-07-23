@@ -25,20 +25,20 @@ static long lockoutTimer[11];
 const int MPU_addr = 0x68; // I2C address of the MPU-6050
 
 //Create filters for the accelerometer and gyro sensors
-SimpleKalman AcXFilter(0.125, 32, 512, 0);
-SimpleKalman AcYFilter(0.125, 32, 512, 0);
-SimpleKalman AcZFilter(0.125, 32, 512, 0);
-SimpleKalman GyXFilter(0.125, 32, 512, 0);
-SimpleKalman GyYFilter(0.125, 32, 512, 0);
-SimpleKalman GyZFilter(0.125, 32, 512, 0);
+SimpleKalman AcXFilter(0.125, 32, 1024, 0);
+SimpleKalman AcYFilter(0.125, 32, 1024, 0);
+SimpleKalman AcZFilter(0.125, 32, 1024, 0);
+SimpleKalman GyXFilter(0.125, 32, 1024, 0);
+SimpleKalman GyYFilter(0.125, 32, 1024, 0);
+SimpleKalman GyZFilter(0.125, 32, 1024, 0);
 
-#define X_SENS 0.10
-#define Y_SENS 0.10
-#define Z_SENS 0.10
+#define X_SENS 250
+#define Y_SENS 250
+#define Z_SENS 250
 
-#define X_REPS 5
-#define Y_REPS 5
-#define Z_REPS 5
+#define X_REPS 3
+#define Y_REPS 3
+#define Z_REPS 3
 
 
 #define BASELINE_COUNT 10
@@ -62,6 +62,9 @@ int16_t leftCntr, rightCntr, gasCntr, brakeCntr = 0;
 // Switches and buttons
 #define HORN_PIN 4
 #define ENABLE_PIN 9
+#define HORN_BUTTON 0
+#define ENABLE_SWITCH 1
+bool soundsEnabled = false;
 byte switches[] = {HORN_PIN, ENABLE_PIN};
 #define NUM_SWITCHES sizeof(switches)
 byte switchState[NUM_SWITCHES]; //LOW means switch is on or button is pressed
@@ -90,12 +93,12 @@ void setup() {
   for (i = 0; i < NUM_SWITCHES; i++) {
     pinMode(switches[i], INPUT);
     digitalWrite(switches[i], HIGH);
+    switchState[i] = false;
   }
 
-  //Establish a baseline for the accelerator, gyro and temprature data.  Assumes kart will be stationary.
+  //Establish a baseline for the accelerator and gyro data.  Assumes kart will be stationary.
   Serial.println("Establising baseline");
   for (i = 0; i <= 10; i++) {
-    Serial.println(i);
     readMPU6050();
     filterMPU6050();
     delay(200);
@@ -107,13 +110,30 @@ void setup() {
   }
 
   //Let's tell the world that we are up and running.
-  playSound(wavTrigger, ENABLED_SOUND);
+  playSound(wavTrigger, STARTUP_SOUND, true);
   Serial.print("It's time for the Boxie that makes some moxie! "); Serial.println(millis());
 }
 
 void loop() {
 
   checkSwitches();
+
+  if (leadingEdge[HORN_BUTTON]) {
+    playSound(wavTrigger, HORN_SOUND, true);
+  }
+
+if (switchState[ENABLE_SWITCH])
+{
+  soundsEnabled =true;
+}
+else
+{
+    soundsEnabled =false;
+}
+
+    if (leadingEdge[ENABLE_SWITCH]) {
+    playSound(wavTrigger, ENABLED_SOUND, true);
+  }
 
   //save all the accelerometer and gyro values so we can diff them
   accelLast[X_AXIS] = accelFiltered[X_AXIS];
@@ -127,32 +147,32 @@ void loop() {
   //Get the current accelerometer and gyro values and filter them
   readMPU6050();
   filterMPU6050();
- 
-// --- X AXIS ---
+
+  // --- X AXIS ---
   //LEFT detection
-  if ((accelFiltered[X_AXIS] - accelLast[X_AXIS]) / accelLast[X_AXIS] >= X_SENS
-      && lockoutTimer[LEFT_SOUND] < millis()) {
+  if ((accelFiltered[X_AXIS] - accelLast[X_AXIS]) >= X_SENS
+      && lockoutTimer[LEFT_SOUND] <= millis()) {
     rightCntr = 0;
     leftCntr++;
     if (leftCntr == X_REPS ) {
       Serial.print("LEFT AcX= "); Serial.println(accelFiltered[X_AXIS]);
       //stop the right turn sound from being played
       lockoutTimer[RIGHT_SOUND] = millis() + LOCKOUT_TIME;
-      playSound(wavTrigger, LEFT_SOUND);
+      playSound(wavTrigger, LEFT_SOUND, false);
       leftCntr = 0;
     }
   }
 
   //RIGHT detection
-  if ((accelFiltered[X_AXIS] - accelLast[X_AXIS]) / accelLast[X_AXIS] <= -X_SENS
-      && lockoutTimer[RIGHT_SOUND] < millis()) {
+  if ((accelFiltered[X_AXIS] - accelLast[X_AXIS]) <= -X_SENS
+      && lockoutTimer[RIGHT_SOUND] <= millis()) {
     leftCntr = 0;
     rightCntr++;
     if (rightCntr == X_REPS ) {
       Serial.print("RIGHT AcX= "); Serial.println(accelFiltered[X_AXIS]);
       //stop the left turn sound from being played
       lockoutTimer[LEFT_SOUND] = millis() + LOCKOUT_TIME;
-      playSound(wavTrigger, RIGHT_SOUND);
+      playSound(wavTrigger, RIGHT_SOUND, false);
       rightCntr = 0;
     }
   }
@@ -161,37 +181,35 @@ void loop() {
   // --- Y AXIS ---
   //BRAKE detection
 
-  
-  if ((accelFiltered[Y_AXIS] - accelLast[Y_AXIS]) / accelLast[Y_AXIS] >= Y_SENS
-      && lockoutTimer[BRAKE_SOUND] < millis()) {
+
+  if ((accelFiltered[Y_AXIS] - accelLast[Y_AXIS])  >= Y_SENS
+      && lockoutTimer[BRAKE_SOUND] <= millis()) {
     gasCntr = 0;
     brakeCntr++;
     if (brakeCntr == Y_REPS ) {
       Serial.print("BRAKE AcY= "); Serial.println(accelFiltered[Y_AXIS]);
       //stop the gas sound from being played
       lockoutTimer[GAS_SOUND] = millis() + LOCKOUT_TIME;
-            brakeCntr = 0;
-      playSound(wavTrigger, BRAKE_SOUND);
+      brakeCntr = 0;
+      playSound(wavTrigger, BRAKE_SOUND, false);
 
     }
   }
 
   //Gas detection
-  if ((accelFiltered[Y_AXIS] - accelLast[Y_AXIS]) / accelLast[Y_AXIS] <= -Y_SENS
-      && lockoutTimer[GAS_SOUND] < millis()) {
+  if ((accelFiltered[Y_AXIS] - accelLast[Y_AXIS])  <= -Y_SENS
+      && lockoutTimer[GAS_SOUND] <= millis()) {
     brakeCntr = 0;
     gasCntr++;
     if (gasCntr == Y_REPS ) {
       Serial.print("GAS AcY= "); Serial.println(accelFiltered[Y_AXIS]);
       //stop the brake sound from being played
       lockoutTimer[BRAKE_SOUND] = millis() + LOCKOUT_TIME;
-            gasCntr = 0;
-      playSound(wavTrigger, GAS_SOUND);
+      gasCntr = 0;
+      playSound(wavTrigger, GAS_SOUND, false);
     }
   }
-   
 
-  
 
 
 
@@ -214,15 +232,15 @@ void readMPU6050() {  //Reads MPU-6050
   gyro[Y_AXIS] = Wire.read() << 8 | Wire.read(); // 0x45 (GYRO_YOUT_H) & 0x46 (GYRO_YOUT_L)
   gyro[Z_AXIS] = Wire.read() << 8 | Wire.read(); // 0x47 (GYRO_ZOUT_H) & 0x48 (GYRO_ZOUT_L)
 
- /* Serial.print("MPU6050"); Serial.print(millis());
-  Serial.print(" AcX = "); Serial.print(accel[X_AXIS]);
-  Serial.print(" GyX = "); Serial.print(gyro[X_AXIS]);
-  Serial.print(" AcY = "); Serial.print(accel[Y_AXIS]);
-  Serial.print(" GyY = "); Serial.print(gyro[Y_AXIS]);
-  Serial.print(" AcZ = "); Serial.print(accel[Z_AXIS]);
-  Serial.print(" GyZ = "); Serial.print(gyro[Z_AXIS]);
-  Serial.print(" Tmp = "); Serial.print(temprature);
-  Serial.println(); 
+  /* Serial.print("MPU6050"); Serial.print(millis());
+    Serial.print(" AcX = "); Serial.print(accel[X_AXIS]);
+    Serial.print(" GyX = "); Serial.print(gyro[X_AXIS]);
+    Serial.print(" AcY = "); Serial.print(accel[Y_AXIS]);
+    Serial.print(" GyY = "); Serial.print(gyro[Y_AXIS]);
+    Serial.print(" AcZ = "); Serial.print(accel[Z_AXIS]);
+    Serial.print(" GyZ = "); Serial.print(gyro[Z_AXIS]);
+    Serial.print(" Tmp = "); Serial.print(temprature);
+    Serial.println();
   */
 }
 
@@ -248,8 +266,8 @@ void filterMPU6050() {
 
 void checkSwitches()
 {
-  static byte previousState[NUM_SWITCHES];
-  static byte switchState[NUM_SWITCHES];
+  static byte currentState[NUM_SWITCHES];
+  static byte lastState[NUM_SWITCHES];
   static long lasttime;
   byte index;
   if (millis() < lasttime) {
@@ -269,33 +287,41 @@ void checkSwitches()
     leadingEdge[index] = false;
     trailingEdge[index] = false;
 
-    switchState[index] = digitalRead(switches[index]);   // read the switch status
+    currentState[index] = digitalRead(switches[index]);   // read the switch status
 
-    if (switchState[index] == previousState[index]) {
-      if ((switchState[index] == LOW) && (switchState[index] == LOW)) {
-        // just switchState
+    //   Serial.print("switch ");Serial.print(index, DEC);Serial.print(" state");Serial.println(currentState[index], DEC);
+
+    if (currentState[index] == lastState[index]) {  // switch is stable
+
+      //Serial.print("switch ");Serial.print(index, DEC);Serial.println(" stable");
+
+      if ((switchState[index] == false) && (currentState[index] == LOW)) { //just pressed
         leadingEdge[index] = true;
       }
-      else if ((switchState[index] == HIGH) && (switchState[index] == HIGH)) {
-        // just released
+      else if ((switchState[index] == true) && (currentState[index] == HIGH)) {  // just released
         trailingEdge[index] = true;
       }
-      switchState[index] = !switchState[index];  // remember, digital HIGH means NOT switchState
+      switchState[index] = !currentState[index];  // remember, digital HIGH means NOT switchState
     }
+
     //Serial.println(switchState[index], DEC);
-    previousState[index] = switchState[index];   // keep a running tally of the switches
+    lastState[index] = currentState[index];   // keep a running tally of the switches
   }
 }
 
-void playSound(SoftwareSerial serialInterface, int track) {
-  byte txbuf[8];
-  txbuf[0] = 0xf0; //SOM1
-  txbuf[1] = 0xaa; //SOM2
-  txbuf[2] = 0x08; //Length
-  txbuf[3] = 0x03; //Resume 0x01 is play poly
-  txbuf[4] = 0x00; //
-  txbuf[5] = (byte)track;
-  txbuf[6] = (byte)(track >> 8);
-  txbuf[7] = 0x55; //EOM
-  serialInterface.write(txbuf, 8);
+void playSound(SoftwareSerial serialInterface, int track, bool override) {
+  if (soundsEnabled || override)  {
+    byte txbuf[8];
+    txbuf[0] = 0xf0; //SOM1
+    txbuf[1] = 0xaa; //SOM2
+    txbuf[2] = 0x08; //Length
+    txbuf[3] = 0x03; //Resume 0x01 is play poly
+    txbuf[4] = 0x00; //
+    txbuf[5] = (byte)track;
+    txbuf[6] = (byte)(track >> 8);
+    txbuf[7] = 0x55; //EOM
+    serialInterface.write(txbuf, 8);
+  }
+
+
 }
